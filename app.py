@@ -1,113 +1,90 @@
 import streamlit as st
 import os
+import time
+from dotenv import load_dotenv
+
 from langchain_groq import ChatGroq
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFDirectoryLoader
-from dotenv import load_dotenv
-import time
 
 # Load environment variables
 load_dotenv()
 os.environ['OPENAI_API_KEY'] = os.getenv("OPENAI_API_KEY")
 os.environ['GROQ_API_KEY'] = os.getenv("GROQ_API_KEY")
-os.environ['HF_TOKEN'] = os.getenv("HF_TOKEN")
 
-# Initialize LLM
-llm = ChatGroq(
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    model_name="Llama3-8b-8192"
-)
+# Initialize Groq LLM
+llm = ChatGroq(groq_api_key=os.environ['GROQ_API_KEY'], model_name="Llama3-8b-8192")
 
-# Prompt Template WITH history placeholder
+# Prompt template
 prompt = ChatPromptTemplate.from_template(
     """
-    You are an AI research assistant. Answer the question based on the context and conversation history.
-    
-    <history>
-    {history}
-    </history>
-
+    Answer the questions based on the provided context only.
+    Please provide the most accurate response based on the question
     <context>
     {context}
-    </context>
-
+    <context>
     Question: {input}
     """
 )
 
-# Function to embed documents
-def create_vector_embedding():
-    if "vectors" not in st.session_state:
-        st.session_state.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        st.session_state.loader = PyPDFDirectoryLoader("research_papers")
-        st.session_state.docs = st.session_state.loader.load()
-        st.session_state.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        st.session_state.final_documents = st.session_state.text_splitter.split_documents(
-            st.session_state.docs[:50]  # For demo, limit to 50 PDFs
-        )
-        st.session_state.vectors = FAISS.from_documents(
-            st.session_state.final_documents,
-            st.session_state.embeddings
-        )
-
-# Initialize session state for chat history
+# Initialize session state
+if "vectors" not in st.session_state:
+    st.session_state.vectors = None
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Streamlit UI
-st.title("🧠 RAG Chatbot with Memory - LLaMA3 via Groq")
+# UI
+st.title("📚 RAG Document Q&A with Groq & Llama3")
 
-if st.button("📚 Create Document Embedding"):
-    create_vector_embedding()
-    st.success("✅ Vector database is ready!")
+# Upload PDFs section (optional enhancement)
+user_prompt = st.text_input("🔎 Ask a question from the research paper")
 
-user_prompt = st.text_input("Ask something from the documents:")
+if st.button("📥 Embed PDFs"):
+    st.session_state.embeddings = OpenAIEmbeddings()
+    st.session_state.loader = PyPDFDirectoryLoader("research_papers")  # Your PDF folder
+    st.session_state.docs = st.session_state.loader.load()
+    st.session_state.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    st.session_state.final_documents = st.session_state.text_splitter.split_documents(st.session_state.docs[:50])
+    st.session_state.vectors = FAISS.from_documents(st.session_state.final_documents, st.session_state.embeddings)
+    st.success("✅ Document embeddings created and stored in vector DB.")
 
-if user_prompt:
-    if "vectors" not in st.session_state:
-        st.error("⚠️ Please click 'Create Document Embedding' before asking a question.")
-        st.stop()
-
-    # Append user input to chat history
-    st.session_state.chat_history.append({"role": "user", "content": user_prompt})
-
-    # Convert chat history into a string
-    history_text = ""
-    for msg in st.session_state.chat_history:
-        prefix = "User" if msg["role"] == "user" else "AI"
-        history_text += f"{prefix}: {msg['content']}\n"
-
-    # Create document + retrieval chain
+if user_prompt and st.session_state.vectors:
+    # Create retrieval chain
     document_chain = create_stuff_documents_chain(llm, prompt)
     retriever = st.session_state.vectors.as_retriever()
     retrieval_chain = create_retrieval_chain(retriever, document_chain)
 
     start = time.process_time()
-    response = retrieval_chain.invoke({
-        'input': user_prompt,
-        'history': history_text
-    })
+    response = retrieval_chain.invoke({'input': user_prompt})
     elapsed = time.process_time() - start
 
-    # Save assistant reply to history
-    st.session_state.chat_history.append({"role": "ai", "content": response['answer']})
+    # Store in chat history
+    st.session_state.chat_history.append((user_prompt, response['answer']))
 
-    # Show the answer
-    st.markdown(f"**🧠 LLaMA3:** {response['answer']}")
-    st.caption(f"⏱️ Response time: {elapsed:.2f}s")
+    # Display current response
+    st.subheader("🧠 Response")
+    st.write(response['answer'])
 
-    # Show retrieved context chunks
-    with st.expander("🔍 Retrieved Document Chunks"):
+    # Document match expander
+    with st.expander("📄 Similar Documents Retrieved"):
         for i, doc in enumerate(response['context']):
             st.write(doc.page_content)
-            st.markdown("---")
+            st.write("---")
 
-# Optional: Clear history
-if st.button("🔁 Clear Chat History"):
+# Show chat history
+if st.session_state.chat_history:
+    st.markdown("## 💬 Chat History")
+    for idx, (q, a) in enumerate(st.session_state.chat_history):
+        st.markdown(f"**🧑 Q{idx+1}:** {q}")
+        st.markdown(f"**🤖 A{idx+1}:** {a}")
+        st.markdown("---")
+
+# Option to clear chat history
+if st.button("🗑️ Clear Chat History"):
     st.session_state.chat_history = []
     st.success("Chat history cleared.")

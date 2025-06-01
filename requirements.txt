@@ -17,3 +17,4 @@ langchain_core
 fastapi
 langserve
 langchain_community
+langchain_huggingface

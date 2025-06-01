@@ -18,3 +18,12 @@ fastapi
 langserve
 langchain_community
 langchain_huggingface
+streamlit
+python-dotenv
+langchain
+langchain-community
+langchain-core
+langchain-groq
+langchain-huggingface
+sentence-transformers
+faiss-cpu

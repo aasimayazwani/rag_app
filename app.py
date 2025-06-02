@@ -17,7 +17,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import PyPDFLoader, CSVLoader
 
 # === Directories ===
-BASE_DIR = "/mnt/data/rag_app_data"
+BASE_DIR = "rag_app_data"
 FAISS_DIR = os.path.join(BASE_DIR, "faiss_index")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_docs")
 os.makedirs(FAISS_DIR, exist_ok=True)
@@ -47,60 +47,60 @@ if "uploaded_files" not in st.session_state:
     st.session_state.uploaded_files = []
 
 # === Load FAISS Index If Available ===
-if os.path.exists(os.path.join(FAISS_DIR, "index.faiss")) and os.path.exists(os.path.join(FAISS_DIR, "index.pkl")):
+if os.path.exists(os.path.join(FAISS_DIR, "index.faiss")):
     st.session_state.vectors = FAISS.load_local(FAISS_DIR, OpenAIEmbeddings(), allow_dangerous_deserialization=True)
 
 # === Page Config ===
 st.set_page_config(page_title="RAG Chatbot with Upload", layout="wide")
-st.title("📄 RAG Chatbot with Groq + File Upload + Timestamps")
+st.title("📄 RAG Chatbot | CSV + PDF | Groq + File Upload + Summary")
 
-# === Side panel for file list ===
+# === Sidebar Info ===
 with st.sidebar:
-    st.markdown("### 📂 Uploaded Files")
-    files = os.listdir(UPLOAD_DIR)
-    if files:
-        for f in files:
-            st.markdown(f"- {f}")
+    st.markdown("### 📁 Uploaded Files")
+    if st.session_state.uploaded_files:
+        for fname in st.session_state.uploaded_files:
+            st.markdown(f"- {fname}")
     else:
         st.info("No files uploaded yet.")
 
-# === Upload Button ===
-with st.expander("➕ Upload file"):
-    uploaded_files = st.file_uploader("Upload PDF or CSV", type=["pdf", "csv"], accept_multiple_files=True)
+# === Small Upload Button ===
+with st.container():
+    with st.expander("➕ Upload CSV or PDF"):
+        files = st.file_uploader("Select files", type=["pdf", "csv"], accept_multiple_files=True, label_visibility="collapsed")
 
-if uploaded_files:
-    all_docs = []
-    for file in uploaded_files:
-        file_path = os.path.join(UPLOAD_DIR, file.name)
-        with open(file_path, "wb") as f:
-            f.write(file.read())
+if files:
+    with st.spinner("Processing and embedding documents..."):
+        all_docs = []
+        for file in files:
+            path = os.path.join(UPLOAD_DIR, file.name)
+            if file.name not in st.session_state.uploaded_files:
+                with open(path, "wb") as f:
+                    f.write(file.read())
+                st.session_state.uploaded_files.append(file.name)
 
-        st.session_state.uploaded_files.append(file.name)
+            if file.name.endswith(".pdf"):
+                loader = PyPDFLoader(path)
+                all_docs.extend(loader.load())
+            elif file.name.endswith(".csv"):
+                df = pd.read_csv(path)
+                all_docs.append(df.to_markdown())
+                st.markdown("### 📊 CSV Summary")
+                st.dataframe(df.describe(include='all').transpose())
 
-        if file.name.endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-            all_docs.extend(loader.load())
-        elif file.name.endswith(".csv"):
-            loader = CSVLoader(file_path=file_path, encoding="utf-8")
-            all_docs.extend(loader.load())
-            # Summary statistics for CSV
-            df = pd.read_csv(file_path)
-            st.markdown(f"#### 📊 Summary of {file.name}")
-            st.dataframe(df.describe(include='all').fillna(""))
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = splitter.split_documents(all_docs) if isinstance(all_docs[0], dict) else []
 
-    if all_docs:
-        with st.spinner("Embedding documents..."):
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            chunks = splitter.split_documents(all_docs)
+        if chunks:
             embeddings = OpenAIEmbeddings()
-            new_vectorstore = FAISS.from_documents(chunks, embeddings)
+            new_index = FAISS.from_documents(chunks, embeddings)
 
             if st.session_state.vectors:
-                st.session_state.vectors.merge_from(new_vectorstore)
+                st.session_state.vectors.merge_from(new_index)
             else:
-                st.session_state.vectors = new_vectorstore
+                st.session_state.vectors = new_index
+
             st.session_state.vectors.save_local(FAISS_DIR)
-        st.success("✅ Documents embedded and saved!")
+            st.success("✅ Documents embedded and saved!")
 
 # === Clear Chat Button ===
 if st.button("🧹 Clear Chat History"):
@@ -124,6 +124,7 @@ if st.session_state.vectors:
         with st.spinner("Generating response..."):
             response = retrieval_chain.invoke({"input": user_input})
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             st.session_state.chat_history.append({
                 "timestamp": timestamp,
                 "question": user_input,

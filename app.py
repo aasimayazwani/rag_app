@@ -58,13 +58,17 @@ st.title("📄 RAG Chatbot | CSV + PDF | Upload + Summarize + Chat")
 with st.sidebar:
     st.markdown("### 📂 Uploaded Files")
     existing_files = sorted(f for f in os.listdir(UPLOAD_DIR) if f.endswith((".csv", ".pdf")))
+
     if existing_files:
         for file in existing_files:
-            col1, col2 = st.columns([4, 1])
-            col1.markdown(f"- {file}")
-            if col2.button("❌", key=f"delete_{file}"):
-                os.remove(os.path.join(UPLOAD_DIR, file))
-                st.experimental_rerun()
+            file_path = os.path.join(UPLOAD_DIR, file)
+            with st.form(key=f"delete_form_{file}"):
+                st.markdown(f"- `{file}`")
+                delete = st.form_submit_button("❌ Delete")
+                if delete:
+                    os.remove(file_path)
+                    st.success(f"{file} deleted.")
+                    st.experimental_rerun()
     else:
         st.info("No uploaded files found.")
 

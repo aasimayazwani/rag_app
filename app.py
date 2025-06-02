@@ -54,17 +54,21 @@ if os.path.exists(faiss_index_path) and os.path.exists(faiss_meta_path):
 st.set_page_config(page_title="RAG Chatbot | PDF + CSV", layout="wide")
 st.title("📄 RAG Chatbot | CSV + PDF | Upload + Summarize + Chat")
 
-# === File Management Button ===
+# === Sidebar with file listing and delete buttons ===
 with st.sidebar:
     st.markdown("### 📂 Uploaded Files")
     existing_files = sorted(f for f in os.listdir(UPLOAD_DIR) if f.endswith((".csv", ".pdf")))
     if existing_files:
         for file in existing_files:
-            st.markdown(f"- {file}")
+            col1, col2 = st.columns([4, 1])
+            col1.markdown(f"- {file}")
+            if col2.button("❌", key=f"delete_{file}"):
+                os.remove(os.path.join(UPLOAD_DIR, file))
+                st.experimental_rerun()
     else:
         st.info("No uploaded files found.")
 
-# === Upload Icon in Header ===
+# === Upload Section ===
 st.markdown("<style>.upload-icon { position: absolute; top: 20px; right: 20px; }</style>", unsafe_allow_html=True)
 with st.expander("➕ Upload Files", expanded=False):
     uploaded = st.file_uploader("", type=["pdf", "csv"], accept_multiple_files=True, label_visibility="collapsed")

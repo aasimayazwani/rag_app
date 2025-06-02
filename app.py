@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
+import re
 
 from langchain_groq import ChatGroq
 from langchain_openai import OpenAIEmbeddings
@@ -43,6 +44,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "vectors" not in st.session_state:
     st.session_state.vectors = None
+if "csv_dataframes" not in st.session_state:
+    st.session_state.csv_dataframes = {}
 
 # === Auto-load existing vectorstore ===
 faiss_index_path = os.path.join(FAISS_DIR, "index.faiss")
@@ -93,6 +96,7 @@ if uploaded:
             all_docs.extend(loader.load())
             try:
                 df = pd.read_csv(path)
+                st.session_state.csv_dataframes[file.name] = df
                 with st.expander(f"📊 Summary of `{file.name}`"):
                     st.dataframe(df.describe(include='all').transpose())
             except Exception as e:
@@ -114,18 +118,45 @@ if uploaded:
 user_input = st.chat_input("Ask a question about your uploaded documents")
 
 if user_input:
-    if st.session_state.vectors:
-        chain = create_retrieval_chain(
-            st.session_state.vectors.as_retriever(),
-            create_stuff_documents_chain(llm, prompt),
-        )
-        with st.spinner("Searching documents and generating answer..."):
-            result = chain.invoke({"input": user_input})
-        answer = result["answer"]
-    else:
-        with st.spinner("Using LLM without document context..."):
-            result = llm.invoke(user_input)
-        answer = result.content if hasattr(result, "content") else str(result)
+    answer = ""
+    csv_used = False
+
+    # Try answering with pandas if the query matches column patterns
+    for name, df in st.session_state.csv_dataframes.items():
+        cols_lower = [col.lower() for col in df.columns]
+        if any(re.search(col, user_input.lower()) for col in cols_lower):
+            try:
+                # Attempt summary type questions
+                if "sum" in user_input.lower():
+                    result = df.sum(numeric_only=True)
+                elif "average" in user_input.lower() or "mean" in user_input.lower():
+                    result = df.mean(numeric_only=True)
+                elif "count" in user_input.lower():
+                    result = df.count()
+                else:
+                    result = df.describe(include='all').transpose()
+                answer = f"From `{name}`:\n" + result.to_string()
+                csv_used = True
+                break
+            except Exception as e:
+                answer = f"Error parsing CSV with pandas: {e}"
+                csv_used = True
+                break
+
+    # If no CSV logic applied, use vector or fallback to LLM
+    if not csv_used:
+        if st.session_state.vectors:
+            chain = create_retrieval_chain(
+                st.session_state.vectors.as_retriever(),
+                create_stuff_documents_chain(llm, prompt),
+            )
+            with st.spinner("Searching documents and generating answer..."):
+                result = chain.invoke({"input": user_input})
+            answer = result["answer"]
+        else:
+            with st.spinner("Using LLM without document context..."):
+                result = llm.invoke(user_input)
+            answer = result.content if hasattr(result, "content") else str(result)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     st.session_state.chat_history.append({

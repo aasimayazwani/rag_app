@@ -18,6 +18,7 @@ from langchain_community.document_loaders import PyPDFLoader, CSVLoader
 BASE_DIR = "rag_app_data"
 FAISS_DIR = os.path.join(BASE_DIR, "faiss_index")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_docs")
+os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(FAISS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -53,7 +54,7 @@ if os.path.exists(faiss_index_path) and os.path.exists(faiss_meta_path):
 st.set_page_config(page_title="RAG Chatbot | PDF + CSV", layout="wide")
 st.title("📄 RAG Chatbot | CSV + PDF | Upload + Summarize + Chat")
 
-# === Sidebar with upload ===
+# === File Management Button ===
 with st.sidebar:
     st.markdown("### 📂 Uploaded Files")
     existing_files = sorted(f for f in os.listdir(UPLOAD_DIR) if f.endswith((".csv", ".pdf")))
@@ -63,7 +64,10 @@ with st.sidebar:
     else:
         st.info("No uploaded files found.")
 
-    uploaded = st.file_uploader("➕ Upload PDF or CSV", type=["pdf", "csv"], accept_multiple_files=True)
+# === Upload Icon in Header ===
+st.markdown("<style>.upload-icon { position: absolute; top: 20px; right: 20px; }</style>", unsafe_allow_html=True)
+with st.expander("➕ Upload Files", expanded=False):
+    uploaded = st.file_uploader("", type=["pdf", "csv"], accept_multiple_files=True, label_visibility="collapsed")
 
 # === Handle Upload ===
 if uploaded:
@@ -81,8 +85,8 @@ if uploaded:
             all_docs.extend(loader.load())
             try:
                 df = pd.read_csv(path)
-                st.markdown(f"### 📊 Summary of `{file.name}`")
-                st.dataframe(df.describe(include='all').transpose())
+                with st.expander(f"📊 Summary of `{file.name}`"):
+                    st.dataframe(df.describe(include='all').transpose())
             except Exception as e:
                 st.warning(f"Unable to summarize {file.name}: {e}")
 
